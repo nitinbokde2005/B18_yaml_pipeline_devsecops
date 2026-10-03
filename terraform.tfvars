@@ -1,0 +1,23 @@
+location    = "South India"
+environment = "prod"
+
+resource_group_name = "rg-prod-terraform"
+
+vnet_name = "vnet-prod"
+
+vnet_address_space = [
+  "10.10.0.0/16"
+]
+
+subnets = {
+  app     = "10.10.1.0/24"
+  bastion = "10.10.2.0/27"
+}
+
+vm_name = "vm-prod-01"
+
+vm_size = "Standard_B2as_v2"
+
+admin_username = "azureadmin"
+
+ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDCo2l9qFzAFTzI+Tp28aSkuOeZpjqlQaNZzK0PNyHMf26RtwnPRmexA3sGng5BpfTkA84WnZ8OpXk/uiVKMjrcl7VKoknTWA81QCbfO0N5sG8AVj3LlmF3ky3ZsMswvXq37VjnOMqnPxENhRA62tepTH7YT1M05B50IiKNv3N0mBdjTKEJPzWSKBHtTnscNHXonL6zL7OkeNfrTGun0OmjVnpuPPyp5JhB9uaWQ6lkq/9OJrJF3l9wAVUg0SPt00CljbMiHOeNagdxm4ZY42G8tQe37PX0zagW+6OfdqWhTQYik75EhGVDZU19CTCLzmRpzQpwi67gAP0URFO/15cOGgRpDBF53jDf/ht95ARmKCubNX1hDiQmnMc3BSU3oNbiQKX+6JZU0aVAgEoWBEFj40pLY5+etqEP7pRVlidHisZLVpdVoyUNZPBkRMnM/7j53NsQ1T3KtdBji63KjViUOdA9VCVwMjDE/FXasMg7NUvRGtXEDtqK9dFQzamb1NPciHtuxTSOF3uAHrXKOLKxO3CBxe730KGP2zfIu0QtsICqmR1M7ZYMrtJwAIB10y/fsOq1mjkRGQ3PY/qtI/8p/DyK87igICPnRKUyvDYL7D5Gxkwy52HPSlTLSwK+fOF/YfxKw4d8G4IqAA1JJP9NdPvk9b/gyAR6xdfhA6XPBQ== nitin@DESKTOP-QONH5KI"
