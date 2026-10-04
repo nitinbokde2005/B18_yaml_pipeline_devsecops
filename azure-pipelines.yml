@@ -1,0 +1,404 @@
+pool: Nitin-ADOpipeline
+
+parameters:
+
+- name: runtflint
+  displayName: runtflint?
+  type: boolean
+  default: false
+
+- name: runtfsec
+  displayName: runtfsec?
+  type: boolean
+  default: false
+
+- name: runcheckov
+  displayName: runcheckov?
+  type: boolean
+  default: false
+
+- name: rungitleaks
+  displayName: rungitleaks?
+  type: boolean
+  default: false
+
+- name: runtrivy
+  displayName: runtrivy?
+  type: boolean
+  default: false
+
+- name: runTerraformPlan
+  displayName: "Run Terraform Plan"
+  type: boolean
+  default: false
+
+- name: runTerraformApply
+  displayName: "Run Terraform Apply"
+  type: boolean
+  default: false
+
+
+trigger:
+- main
+- feature/*
+
+
+stages:
+
+# ============================================================
+# 1. TFLINT
+# ============================================================
+- stage: tflint
+  displayName: tflint
+  condition: ${{ parameters.runtflint }}
+  dependsOn: []
+
+  jobs:
+  - job: tflint
+    displayName: "TFLint"
+
+    steps:
+    - script: |
+        echo "Installing TFLint..."
+        curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+
+        echo "Running TFLint..."
+        tflint --init
+        tflint --recursive
+      displayName: "TFLint Scan"
+
+
+# ============================================================
+# 2. TFSEC
+# ============================================================
+- stage: tfsec
+  displayName: tfsec
+  condition: ${{ parameters.runtfsec }}
+  dependsOn: []
+
+  jobs:
+  - job: tfsec
+    displayName: tfsec
+
+    steps:
+    - script: |
+        echo Installing tfsec...
+
+        set TFSEC_VERSION=1.28.14
+
+        echo Downloading tfsec version %TFSEC_VERSION%...
+
+        curl.exe -L -f -o tfsec.exe https://github.com/aquasecurity/tfsec/releases/download/v%TFSEC_VERSION%/tfsec-windows-amd64.exe
+
+        if %ERRORLEVEL% NEQ 0 (
+            echo Failed to download tfsec
+            exit /b 1
+        )
+
+        echo Checking tfsec version...
+
+        tfsec.exe --version
+
+        echo Running tfsec...
+
+        tfsec.exe . --minimum-severity MEDIUM
+
+        if %ERRORLEVEL% NEQ 0 (
+            echo tfsec found security issues.
+            exit /b %ERRORLEVEL%
+        )
+
+        echo tfsec scan completed successfully.
+
+      displayName: "tfsec Security Scan"
+
+
+# ============================================================
+# 3. CHECKOV
+# ============================================================
+- stage: Checkov
+  displayName: Checkov
+  condition: ${{ parameters.runcheckov }}
+  dependsOn: []
+
+  jobs:
+  - job: Checkov
+    displayName: Checkov
+
+    steps:
+    - script: |
+        echo "Installing Checkov..."
+
+        python -m pip install --upgrade checkov
+
+        echo "Running Checkov..."
+
+        checkov --version
+
+        checkov -d . --framework terraform
+
+      displayName: "Checkov IaC Scan"
+
+
+# ============================================================
+# 4. GITLEAKS
+# ============================================================
+- stage: Gitleaks
+  displayName: Gitleaks
+  condition: ${{ parameters.rungitleaks }}
+  dependsOn: []
+
+  jobs:
+  - job: Gitleaks
+    displayName: Gitleaks
+
+    steps:
+    - powershell: |
+        Write-Host "Installing Gitleaks..."
+
+        $version = "8.28.0"
+
+        $url = "https://github.com/gitleaks/gitleaks/releases/download/v$version/gitleaks_${version}_windows_x64.zip"
+
+        Invoke-WebRequest $url -OutFile gitleaks.zip
+
+        Expand-Archive gitleaks.zip -DestinationPath gitleaks -Force
+
+        Write-Host "Gitleaks Version:"
+
+        .\gitleaks\gitleaks.exe version
+
+        Write-Host "Running Gitleaks..."
+
+        .\gitleaks\gitleaks.exe detect `
+          --source . `
+          --verbose `
+          --redact
+
+      displayName: "Gitleaks Secret Scan"
+
+
+# ============================================================
+# 5. TRIVY
+# ============================================================
+- stage: Trivy
+  displayName: Trivy
+  condition: ${{ parameters.runtrivy }}
+  dependsOn: []
+
+  jobs:
+  - job: Trivy
+    displayName: Trivy
+
+    steps:
+    - powershell: |
+        Write-Host "Installing Trivy..."
+
+        $release = Invoke-RestMethod `
+          -Uri "https://api.github.com/repos/aquasecurity/trivy/releases/latest"
+
+        $asset = $release.assets |
+          Where-Object { $_.name -like "*windows-64bit.zip" } |
+          Select-Object -First 1
+
+        if (-not $asset) {
+            Write-Error "Trivy Windows ZIP not found."
+            exit 1
+        }
+
+        Write-Host "Downloading Trivy..."
+
+        Invoke-WebRequest `
+          -Uri $asset.browser_download_url `
+          -OutFile "trivy.zip"
+
+        Expand-Archive `
+          "trivy.zip" `
+          -DestinationPath "trivy" `
+          -Force
+
+        Write-Host "Running Trivy..."
+
+        .\trivy\trivy.exe config . `
+          --severity HIGH,CRITICAL `
+          --exit-code 1
+
+      displayName: "Trivy IaC Security Scan"
+
+
+# ============================================================
+# 6. TERRAFORM PLAN
+# ============================================================
+- stage: tfplanstage
+  displayName: "Terraform Plan"
+
+  dependsOn:
+  - tflint
+  - tfsec
+  - Checkov
+  - Gitleaks
+  - Trivy
+
+  condition: and(succeeded(), eq('${{ parameters.runTerraformPlan }}', 'true'))
+
+  jobs:
+
+  - job: tfplanjob
+    displayName: "Terraform Plan"
+
+    steps:
+
+    - checkout: self
+
+
+    # --------------------------------------------------------
+    # Terraform Installation
+    # --------------------------------------------------------
+    - task: TerraformInstaller@1
+      displayName: "Install Terraform"
+
+      inputs:
+        terraformVersion: 'latest'
+
+
+    # --------------------------------------------------------
+    # Terraform Init
+    # --------------------------------------------------------
+    - task: TerraformTask@5
+      displayName: "Terraform Init"
+
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        backendServiceArm: 'nitin-SC'
+        backendAzureRmOverrideSubscriptionID: '10f78393-6f13-4feb-be6e-9b6b27126b0b'
+        backendAzureRmResourceGroupName: 'rg-tfstate'
+        backendAzureRmStorageAccountName: 'stterraformstate1234567'
+        backendAzureRmContainerName: 'tfstate'
+        backendAzureRmKey: 'prod.terraform.tfstate'
+
+
+    # --------------------------------------------------------
+    # Terraform Format
+    # --------------------------------------------------------
+    - task: TerraformTask@5
+      displayName: "Terraform Format"
+
+      inputs:
+        provider: 'azurerm'
+        command: 'custom'
+        commandOptions: 'fmt'
+        outputTo: 'console'
+        environmentServiceNameAzureRM: 'nitin-SC'
+
+
+    # --------------------------------------------------------
+    # Terraform Validate
+    # --------------------------------------------------------
+    - task: TerraformTask@5
+      displayName: "Terraform Validate"
+
+      inputs:
+        provider: 'azurerm'
+        command: 'validate'
+
+
+    # --------------------------------------------------------
+    # Terraform Plan
+    # --------------------------------------------------------
+    - task: TerraformTask@5
+      displayName: "Terraform Plan"
+
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        environmentServiceNameAzureRM: 'nitin-SC'
+
+
+# ============================================================
+# 7. TERRAFORM APPLY
+# ============================================================
+- stage: tfapplystage
+  displayName: "Terraform Apply"
+
+  dependsOn: tfplanstage
+
+  condition: and(succeeded(), eq('${{ parameters.runTerraformApply }}', 'true'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  jobs:
+
+  # ----------------------------------------------------------
+  # MANUAL APPROVAL
+  # ----------------------------------------------------------
+  - job: Manualapprovaljob
+    displayName: "Manual Approval"
+
+    pool: server
+
+    steps:
+
+    - task: ManualValidation@1
+      displayName: "Approve Terraform Apply"
+
+      inputs:
+        notifyUsers: 'abc@abc.com'
+
+        instructions: |
+          Please review Terraform Plan
+          and approve production deployment.
+
+        onTimeout: 'reject'
+
+
+  # ----------------------------------------------------------
+  # TERRAFORM APPLY
+  # ----------------------------------------------------------
+  - job: tfapplyjob
+    displayName: "Terraform Apply"
+
+    dependsOn: Manualapprovaljob
+
+    condition: succeeded()
+
+    steps:
+
+    - checkout: self
+
+
+    # --------------------------------------------------------
+    # Terraform Installation
+    # --------------------------------------------------------
+    - task: TerraformInstaller@1
+      displayName: "Install Terraform"
+
+      inputs:
+        terraformVersion: 'latest'
+
+
+    # --------------------------------------------------------
+    # Terraform Init
+    # --------------------------------------------------------
+    - task: TerraformTask@5
+      displayName: "Terraform Init"
+
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        backendServiceArm: 'nitin-SC'
+        backendAzureRmOverrideSubscriptionID: '10f78393-6f13-4feb-be6e-9b6b27126b0b'
+        backendAzureRmResourceGroupName: 'rg-tfstate'
+        backendAzureRmStorageAccountName: 'stterraformstate1234567'
+        backendAzureRmContainerName: 'tfstate'
+        backendAzureRmKey: 'prod.terraform.tfstate'
+
+
+    # --------------------------------------------------------
+    # Terraform Apply
+    # --------------------------------------------------------
+    - task: TerraformTask@5
+      displayName: "Terraform Apply"
+
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        environmentServiceNameAzureRM: 'nitin-SC'
